@@ -1,0 +1,14 @@
+# build output
+bin/
+*.exe
+*.pdb
+
+# per-machine data Headroom keeps next to the exe - never commit these
+tables/
+profiles/
+backups/
+
+# firmware files must not end up in the repository
+*.rom
+*.bin
+prefs.txt

@@ -1,0 +1,24 @@
+name: build
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # build.cmd runs the tests first and stops if any fail. The tests need no GPU.
+      - name: Test and build
+        shell: cmd
+        run: build.cmd
+
+      - name: Upload Headroom
+        uses: actions/upload-artifact@v4
+        with:
+          name: Headroom
+          path: |
+            Headroom.exe
+            Reset-to-factory.cmd
