@@ -1,43 +1,41 @@
 # Recovery
 
-Everything Headroom does comes down to one registry value. Removing that value puts the GPU back on the
-factory table in its vBIOS. Nothing is flashed, so there is nothing permanent to undo.
+Everything Headroom changes lives in **one registry value**. Delete it and the GPU goes back to factory.
+Nothing is flashed, so nothing is permanent.
 
-## 1. From Headroom
+Try these in order.
 
-Pick the **Factory** preset and press **Apply to GPU**.
+## 1. Use Headroom
 
-## 2. Without opening the window
+Pick **Factory** and press **Apply to GPU**.
 
-Run `Reset-to-factory.cmd` (next to `Headroom.exe`), or:
+## 2. Use the reset script
+
+Double-click `Reset-to-factory.cmd` (it's next to `Headroom.exe`), or run:
 
 ```
 Headroom.exe --reset
 ```
 
-## 3. By hand, including from Safe Mode
+## 3. Fix it by hand from Safe Mode
 
-Use this if Windows is unstable or the screen stays black after an apply.
+Use this if Windows won't start properly or the screen stays black.
 
-1. Start Windows in Safe Mode (hold **Shift** while choosing *Restart*, then *Troubleshoot → Advanced options →
-   Startup Settings → Restart → 4*). The AMD driver does not load in Safe Mode.
-2. Open `regedit` and go to
-   `HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}`.
-3. Open each numbered subkey (`0000`, `0001`, ...) and find the one whose `DriverDesc` is your Radeon GPU.
-4. Delete the value `PP_PhmSoftPowerPlayTable` in that subkey.
+1. **Start in Safe Mode.** Hold **Shift** while you click *Restart*, then go to *Troubleshoot → Advanced
+   options → Startup Settings → Restart*, and press **4**.
+2. Open **regedit** and go to:
+   ```
+   HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}
+   ```
+3. Open the numbered folders (`0000`, `0001`, …) until you find the one whose `DriverDesc` is your Radeon GPU.
+4. Delete `PP_PhmSoftPowerPlayTable` from that folder.
 5. Restart normally.
 
-The same thing from an administrator command prompt, once you know the subkey number:
+## 4. Reinstall the AMD driver
 
-```
-reg delete "HKLM\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}\0001" /v PP_PhmSoftPowerPlayTable /f
-```
+A fresh driver install removes the value too.
 
-## 4. Reinstall the driver
+---
 
-Installing the AMD graphics driver again removes the value as part of setup.
-
-## Backups
-
-Every apply saves the table that was set before it to `backups\` next to the exe (newest 30 kept). These are
-raw copies of the registry value, useful if you want to return to an exact earlier state.
+**Backups:** each time you apply, Headroom saves the previous table in the `backups` folder next to the exe.
+It keeps the newest 30.

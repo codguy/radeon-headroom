@@ -1,49 +1,46 @@
 # Supported GPUs
 
-Headroom decides by **table format**, not by GPU name. It reads the power table, and if the table is not the
-RX 5000-series layout (format 12.0) it refuses to do anything.
+Headroom checks the GPU's power table format, not its name. If the table isn't the RX 5000 format, Headroom
+won't change anything.
 
-## Tested
+## ✅ Tested
 
-| GPU | Machine | Driver | Result |
-| --- | --- | --- | --- |
-| Radeon RX 5500M (`DEV_7340`, `SUBSYS_130E1462`) | MSI Bravo 15 B5DD | AMD Software 26.10.1 (32.0.21045.16010) | All four ceilings obeyed. Numbers in the README. |
+| GPU | Laptop | Driver |
+| --- | --- | --- |
+| RX 5500M | MSI Bravo 15 B5DD | AMD Software 26.10.1 |
 
-## Expected to work, not yet confirmed
+## ⚠️ Should work, not yet tested
 
-These use the same table format. Headroom runs on them, marks them "untested model" in the title area, and
-asks for confirmation before the first apply.
+These cards use the same table format. Headroom runs on them, but it labels them "untested" and asks you to
+confirm before the first apply.
 
-- Radeon RX 5300M, RX 5500M in other laptops, RX 5600M, RX 5700M
-- Desktop Radeon RX 5500 XT, RX 5600 XT, RX 5700, RX 5700 XT (AMD Software already offers tuning on these)
+- **Laptop:** RX 5300M, RX 5500M (other laptops), RX 5600M, RX 5700M
+- **Desktop:** RX 5500 XT, RX 5600 XT, RX 5700, RX 5700 XT
 
-## Not supported
+## ❌ Not supported
 
 | GPU | Why |
 | --- | --- |
-| Radeon RX 6000 / 6000M series | Different table layout. Refused by the format check. |
-| Radeon RX 7000 series and newer | The driver no longer accepts a registry table. |
-| Integrated Radeon graphics (APUs) | Different table layout and no registry table. |
-| Older Radeon (RX 500, Vega) | Different table layout. |
+| RX 6000 series | Uses a different table format |
+| RX 7000 series and newer | The driver ignores registry tables |
+| Integrated Radeon graphics | Uses a different table format (the graphs still work) |
+| Older Radeon (RX 500, Vega) | Uses a different table format |
+| Nvidia, Intel | No equivalent table. For Nvidia, try MSI Afterburner. |
 
-## Reporting your result
+**Windows:** Windows 10 version 2004 or newer, or Windows 11, 64-bit. Older versions lack features Headroom
+needs.
 
-If you try Headroom on a model that is not in the "Tested" list, please open a *Compatibility report* issue with:
+**Linux:** not needed. The `amdgpu` driver already exposes these controls. Try CoreCtrl or LACT.
 
-1. The output of `Headroom.exe --status` (it contains hardware IDs but nothing personal).
+## Report your card
+
+Tried it on a card that isn't on the tested list? Please open a **Compatibility report** issue with:
+
+1. The output of `Headroom.exe --status`. It shows hardware IDs, nothing personal.
 2. Your AMD Software version.
-3. The tiles from a 20-second **Test** on Factory and again on Cool.
+3. The results of a 20-second **Test** on **Factory** and on **Cool**.
 
-If the Cool test shows clearly lower speed and power than Factory, the table is being obeyed on your model
-and it can move to the tested list.
+If Cool shows clearly lower speed and power than Factory, it works, and your card can join the tested list.
 
-If Headroom refuses your vBIOS file or your registry table, include the exact message. Please do not attach
-vBIOS files to issues.
-
-## Operating systems
-
-| System | Status |
-| --- | --- |
-| Windows 11, Windows 10 version 2004 or newer (64-bit) | Supported. |
-| Older Windows 10, Windows 8.1, Windows 7 | Not supported: no `pnputil /restart-device` and no per-process GPU counters. |
-| Linux | Not supported and not needed. The `amdgpu` driver exposes these controls directly (see CoreCtrl, LACT). |
+If Headroom rejects your vBIOS or registry table, include the exact error message. Please don't attach vBIOS
+files.

@@ -1,156 +1,149 @@
 # How Headroom works
 
-## The mechanism
+**In short:** the AMD driver reads a power table from the registry when it starts. Headroom edits four numbers
+in a copy of that table, writes it to the registry, and restarts the GPU so the driver loads it. Nothing is
+patched, and the vBIOS is never touched.
 
-When the AMD graphics driver starts, it looks for a registry value named `PP_PhmSoftPowerPlayTable` under the
-GPU's display-class key:
+## The registry value
 
 ```
 HKLM\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}\000X
+    PP_PhmSoftPowerPlayTable
 ```
 
-If the value exists, the driver uses it in place of the "PowerPlay" table stored in the GPU's vBIOS. Headroom
-writes that value and then restarts the GPU device (`pnputil /restart-device`) so the driver starts again and
-reads it. Applying the reference's own settings deletes the value, which puts the GPU back on its vBIOS table.
-
-Nothing in the driver is patched or bypassed. The vBIOS is never modified.
+If this value exists, the driver uses it instead of the table in the vBIOS. Headroom writes it, then runs
+`pnputil /restart-device`. Applying Factory deletes the value.
 
 ## The table format
 
-Headroom supports one layout: the SMU 11 table used by the RX 5000 "Navi 1x" family, format revision 12.0.
-The layout is public in the Linux kernel (`drivers/gpu/drm/amd/pm`): `smu_v11_0_pptable.h` describes the outer
-table and `smu11_driver_if_navi10.h` describes the firmware part (`PPTable_t`) that starts at byte 482.
+Headroom supports only the SMU 11 table used by RX 5000 ("Navi 1x"), format revision 12.0. The layout is
+public in the Linux kernel: `smu_v11_0_pptable.h` covers the outer table, and `smu11_driver_if_navi10.h`
+covers `PPTable_t`, which starts at byte 482.
 
-A table is accepted only if all of this holds (`PowerTable.Check`):
+`PowerTable.Check` rejects a table unless:
 
-- its size field equals its length, and it is at least 1024 bytes;
-- format revision is 12.0 and the driver part is 482 bytes;
-- the fields below hold plausible values (for example a maximum clock between 500 and 2500 MHz).
+- its size field matches its length, and it is at least 1024 bytes;
+- the format is 12.0 and the driver part is 482 bytes;
+- the key fields hold plausible values (for example, a max clock between 500 and 2500 MHz).
 
-Only these fields are ever written:
+Only these fields are written:
 
-| Setting | Field in `PPTable_t` | Byte offset | Stored as |
+| Setting | Field | Offset | Unit |
 | --- | --- | --- | --- |
 | Top speed | `FreqTableGfx[1]` | 816 | MHz |
 | Power limit | `SocketPowerLimitAc[0]` | 494 | W |
-| Power limit on battery | `SocketPowerLimitDc[0]` | 510 | W, only ever lowered |
+| Power limit on battery | `SocketPowerLimitDc[0]` | 510 | W (only ever lowered) |
 | Voltage ceiling | `MaxVoltageGfx` | 590 | mV × 4 |
 | Hotspot limit | `ThotspotLimit` | 536 | °C |
 
-Two more are read for validation and limits: `FreqTableGfx[0]` (814) and `MinVoltageGfx` (586).
+Two more fields are read for validation: `FreqTableGfx[0]` (814) and `MinVoltageGfx` (586).
 
-`ThotspotLimit` acts on the hotspot sensor (the hottest point of the chip), not on the overall GPU temperature.
-The window names it accordingly and plots both.
+## How the fields were verified
 
-## How each field was verified
-
-Each field was confirmed by an A/B test on an RX 5500M: change one value, restart the GPU, run the load test,
-compare with the same test on the unchanged table, then restore.
+Each field was A/B tested on an RX 5500M. The test changed one value, restarted the GPU, ran the load test,
+compared the result with the unchanged table, and then restored it.
 
 | Change | Result |
 | --- | --- |
-| Top speed 1500 → 1200 MHz | reported clock 1440 → 1157 MHz |
-| Top speed 1500 → 1580 MHz | reported clock 1440 → 1522 MHz, voltage rose to the ceiling |
-| Power limit 70 → 45 W | power capped at 44–45 W, clock dropped to ~1295 MHz |
-| Voltage ceiling 962.5 → 900 mV | voltage capped at 900 mV, clock 1440 → 1412 MHz, power 55 → 51 W |
-| Hotspot limit 100 → 80 °C | hotspot held at 78–81 °C by throttling |
-| Table removed | identical to the unchanged table |
+| Top speed 1500 → 1200 MHz | clock 1440 → 1157 MHz |
+| Top speed 1500 → 1580 MHz | clock 1440 → 1522 MHz, voltage hit the ceiling |
+| Power 70 → 45 W | power capped at 44–45 W, clock ~1295 MHz |
+| Voltage 962.5 → 900 mV | voltage capped at 900 mV, clock 1440 → 1412 MHz, power 55 → 51 W |
+| Hotspot 100 → 80 °C | hotspot held at 78–81 °C by throttling |
+| Table removed | same as the unchanged table |
 
-Things worth knowing from those runs:
+Notes from these runs:
 
-- The clock the driver reports sits about 4% below the number in the table, at every setting.
-- The voltage ceiling is a ceiling, not an offset. The GPU follows its own voltage/frequency curve, so
-  lowering the ceiling also costs a little speed.
-- Fan fields in the table were not used. Laptop fans are controlled elsewhere.
+- The reported clock is always about 4% below the table value.
+- The voltage setting is a ceiling, not an offset. Lowering it also costs a little speed.
+- The table's fan fields were not used, because laptop fans are controlled elsewhere.
 
 ## Reference tables and limits
 
-Headroom never ships a table. Each GPU's *reference table* is stored on that PC in `tables\`, named after the
-device and subsystem ID. It comes from an imported vBIOS (`*.vbios.bin`) or, failing that, from the table found
-in the registry on first run (`*.registry.bin`). Every apply starts from the reference and writes the four
-settings into a copy, so the output is always "reference plus four fields".
+Headroom never ships a table. Each PC stores its own **reference table** in `tables\`, named after the device
+and subsystem ID. It comes from an imported vBIOS (`*.vbios.bin`), or else from the registry on first run
+(`*.registry.bin`). Every apply copies the reference and changes only the four settings.
 
-Ranges are derived from the reference (`Limits` in `src/Core.cs`), in three layers. *Hard* is the widest a
-setting may ever go and is what `PowerTable.Apply` enforces. *Default* is what the sliders use out of the box.
-A range chosen in Settings replaces the default and is always pulled inside Hard:
+Slider ranges come from the reference (`Limits` in `src/Core.cs`). *Default* is what the sliders use out of
+the box. *Hard* is the widest allowed, and `PowerTable.Apply` enforces it. Ranges set in Settings are always
+clamped inside Hard.
 
-| Setting | Default range | Hard range |
+| Setting | Default | Hard |
 | --- | --- | --- |
-| Top speed | 50% of reference to reference + 8% | table minimum clock + 100 MHz to reference + 20% |
-| Power limit | 35% of reference to reference | 20% of reference (at least 10 W) to reference |
-| Voltage ceiling | reference − 160 mV (at least 50 mV above the table's minimum voltage) to reference | table minimum voltage + 25 mV to reference |
-| Hotspot limit | 70 °C to reference | 60 °C to reference |
-
-If the reference came from the registry and had been edited before, those edits define the limits. Importing
-the vBIOS fixes that.
+| Top speed | 50% of ref → ref + 8% | table min clock + 100 MHz → ref + 20% |
+| Power | 35% of ref → ref | 20% of ref (min 10 W) → ref |
+| Voltage | ref − 160 mV (≥ table min + 50 mV) → ref | table min + 25 mV → ref |
+| Hotspot | 70 °C → ref | 60 °C → ref |
 
 ## The load test
 
-`src/LoadTest.cs` runs a compute kernel on the chosen GPU through OpenCL in batches of about 0.1 second, and
-samples AMD's sensor log (ADL) twice a second. Averages skip the first quarter of the run.
+`src/LoadTest.cs` runs an OpenCL compute kernel in batches of about 0.1 s and reads AMD's sensors (ADL) twice
+a second. Averages skip the first quarter of the run.
 
-Identical work must produce identical output, so every eighth batch is read back and compared with the first.
-A mismatch, an OpenCL error or a hang is reported as a failed test, which is how an unstable overclock or
-voltage ceiling shows up.
+Every eighth batch is read back and compared with the first. The work is identical, so the output must be
+too. A mismatch, an OpenCL error or a hang counts as a failed test.
 
-The test runs in a helper process (`Headroom.exe --loadtest N "GPU name"`), for two reasons: a GPU restart
-leaves no stale handles in the window's process, and AMD's OpenCL runtime can overflow the stack while
-unloading at exit. The helper suppresses error dialogs and ends itself without unloading libraries.
+The test runs in a helper process (`Headroom.exe --loadtest N "GPU name"`). This keeps stale handles out of
+the main window after a GPU restart, and it sidesteps a stack overflow in AMD's OpenCL runtime when it
+unloads at exit.
 
 ## Calibration
 
-The procedure lives in `Calibration.Run` (`src/Core.cs`) and knows nothing about hardware. It is handed a
-"measure these settings" function and decides what to try next, which is why it can be tested against a
-simulated GPU in `src/Tests.cs`. `src/Calibrator.cs` supplies the real function: write the table, restart the
-GPU, wait three seconds, run the 20-second load test.
+`Calibration.Run` (`src/Core.cs`) is pure logic. It receives a "measure these settings" function, which lets
+`src/Tests.cs` drive it with a simulated GPU. `src/Calibrator.cs` provides the real function: write the
+table, restart the GPU, wait 3 s, and run the load test.
 
-Rules it follows:
+Rules:
 
-- Factory is measured first. If factory fails, nothing else is tried.
-- One setting changes at a time; power and hotspot limits stay at their reference values throughout.
-- Every setting tried is inside the ranges chosen in Settings (or the defaults).
-- Voltage: steps of 24 mV downwards. Stop at the first failed test, or when average speed falls more than 3%
-  below the baseline (that step still counts as "passed", just not as "efficient").
-- Speed: steps of 2% upwards. Stop at the first failed test, when peak hotspot comes within 2 °C of the
-  hotspot limit, or when a step gains less than a quarter of a step in measured speed.
-- The recommended speed is one step below the highest pass if a failure was seen, otherwise the highest pass.
+- Factory is tested first. If it fails, calibration stops.
+- Only one setting changes at a time. Power and hotspot stay at their reference values.
+- Every value tried stays inside the current ranges.
+- **Voltage** steps down 24 mV at a time. It stops at the first failure, or when speed drops more than 3%.
+- **Speed** steps up 2% at a time. It stops at a failure, when the hotspot comes within 2 °C of its limit,
+  or when a step gains less than a quarter of a step in measured speed. If a failure was seen, the result is
+  one step below the highest pass.
+- If the user stops a test, the run is cancelled, not counted as a failure, and nothing is saved.
 
-A test that the user stops is not a failed step: `Calibrator` turns it into a cancellation, so the run ends
-with nothing saved and can never record a stopped test as "unstable".
+Results are saved to `tables\<device>.calibration` and only feed the Efficient and Boost presets.
 
-The result, including the reason each search ended, is stored as `tables\<device>.calibration`. It only feeds the presets:
-Efficient takes the measured voltage ceiling and Boost the measured top speed, both clamped into the current
-ranges. The sliders keep their ranges, so they do not move from one calibration to the next.
-
-Crash safety: before the first step the current registry table is copied to `tables\<device>.interrupted`
-and a `RunOnce` entry is registered to run `Headroom.exe --recover` at the next sign-in. Both are removed when
-the run ends. If either is found later, the saved table is written back and the GPU restarted. A named mutex
-stops a second Headroom process from "recovering" while a run is still in progress.
+**Crash safety:** before the first step, Headroom copies the current table to `tables\<device>.interrupted`
+and registers a `RunOnce` entry for `Headroom.exe --recover`. Both are removed when the run ends. If either
+is still there later, the table is restored. A named mutex stops a second instance from recovering while a
+run is in progress.
 
 ## Code map
 
-| File | What it holds |
+| File | Contents |
 | --- | --- |
-| `src/Core.cs` | All pure logic: table checks and edits, limits, presets, profiles, vBIOS reader, result handling. |
-| `src/Tests.cs` | Console test runner for `Core.cs`. Synthetic tables only. |
-| `src/Gpu.cs` | Finding the GPU, registry access, reference store, backups, device restart. |
-| `src/Sensors.cs` | Live readings through ADL. |
-| `src/LoadTest.cs` | The OpenCL load and its helper process. |
-| `src/Monitor.cs` | The graph control. |
-| `src/Settings.cs` | The settings dialog (ranges, monitor, appearance). |
-| `src/Calibrator.cs` | Runs the calibration procedure against the real GPU and stores the result. |
-| `src/Controls.cs` | Theme and custom controls: rail (stop, ghost, live marker), buttons, card, value label. |
-| `src/Results.cs` | The measuring panel (hint, progress, result tiles) and the status line. |
-| `src/MainForm.cs` | The window: state, apply, test, calibration, profiles, vBIOS import. |
-| `src/Program.cs` | Entry point and command-line modes. |
+| `src/Core.cs` | Pure logic: table checks and edits, limits, presets, profiles, vBIOS reader |
+| `src/Tests.cs` | Test runner for `Core.cs`, using synthetic tables only |
+| `src/Gpu.cs` | GPU discovery, registry, reference store, backups, device restart |
+| `src/Sensors.cs` | Live readings through ADL |
+| `src/LoadTest.cs` | OpenCL load and helper process |
+| `src/Calibrator.cs` | Runs calibration on the real GPU |
+| `src/Monitor.cs` | Graph control |
+| `src/Settings.cs` | Settings dialog |
+| `src/Controls.cs` | Theme and custom controls |
+| `src/Results.cs` | Test results panel and status line |
+| `src/MainForm.cs` | Main window |
+| `src/Program.cs` | Entry point and command-line modes |
+
+## Building
+
+```
+build.cmd          run the tests, then build Headroom.exe
+build.cmd tests    run the tests only
+```
+
+It uses the .NET Framework 4.x C# compiler that ships with Windows.
 
 ## Adding another table format
 
-RX 6000 cards use a different table (SMU 11.0.7 / 13). Supporting one means:
+RX 6000 uses a different table (SMU 11.0.7 / 13). To add it:
 
 1. Add its header check and field offsets next to `PowerTable`, taken from the matching Linux header.
 2. Add tests with a synthetic table in that layout.
-3. Verify every field with the A/B method above on real hardware, and record the numbers.
+3. A/B test every field on real hardware and record the numbers.
 
-Please do not add a format on the strength of the headers alone. A field that the Windows driver ignores, or
-reads differently, only shows up in a measurement.
+Don't add a format from the headers alone. Only a measurement shows whether the Windows driver actually obeys
+a field.
